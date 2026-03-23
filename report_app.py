@@ -248,8 +248,10 @@ def _run_all_analyses(ticker):
 
 
 def run_with_progress(ticker):
-    """Run analyses in background thread, show animated progress bar, cache in session_state."""
+    """Run analyses in background thread, show smooth progress bar, cache in session_state."""
     cache_key = f"data_{ticker}"
+
+    # Already done — return instantly, page renders normally
     if cache_key in st.session_state:
         return st.session_state[cache_key]
 
@@ -265,46 +267,54 @@ def run_with_progress(ticker):
     thread = threading.Thread(target=_worker, daemon=True)
     thread.start()
 
-    steps = [
-        (5,  "Fetching live price & market data…"),
-        (14, "Analysing fundamentals — P/E, EPS, revenue growth…"),
-        (23, "Running technical indicators — RSI, MACD, moving averages…"),
-        (32, "Deep-diving earnings history & SEC 8-K filings…"),
-        (41, "Scanning news headlines & media sentiment…"),
-        (50, "Reading social media — StockTwits & Reddit…"),
-        (59, "Tracking smart money — short interest & institutions…"),
-        (67, "Gathering Wall Street analyst consensus…"),
-        (75, "Comparing performance against sector peers…"),
-        (83, "Matching historical price patterns…"),
-        (91, "Generating Claude AI investment recommendation…"),
-        (96, "Compiling your personalised report…"),
+    step_msgs = [
+        "Fetching live price & market data…",
+        "Analysing fundamentals — P/E, EPS, revenue growth…",
+        "Running technical indicators — RSI, MACD, moving averages…",
+        "Deep-diving earnings history & SEC 8-K filings…",
+        "Scanning news headlines & media sentiment…",
+        "Reading social media — StockTwits & Reddit…",
+        "Tracking smart money — short interest & institutions…",
+        "Gathering Wall Street analyst consensus…",
+        "Comparing performance against sector peers…",
+        "Matching historical price patterns…",
+        "Generating Claude AI investment recommendation…",
+        "Compiling your personalised report…",
     ]
 
-    bar  = st.progress(0)
-    note = st.empty()
-    idx  = 0
+    n_steps       = len(step_msgs)
+    max_pct       = 96          # leave room for the final "done" jump
+    tick          = 0.12        # seconds between updates — smooth motion
+    step_secs     = 4.5         # seconds each step is shown before switching
+    per_step_pct  = max_pct / n_steps
+    per_tick_inc  = per_step_pct / (step_secs / tick)
+
+    bar     = st.progress(0, text=f"**{step_msgs[0]}**")
+    current = 0.0
+    step_idx = 0
 
     while thread.is_alive():
-        if idx < len(steps):
-            pct, msg = steps[idx]
-            bar.progress(pct, text=f"**{msg}**")
-            note.caption(f"Step {idx + 1} of {len(steps)}")
-            idx += 1
-        time.sleep(3.5)
+        current = min(current + per_tick_inc, max_pct)
+        new_idx = min(int(current / per_step_pct), n_steps - 1)
+        if new_idx != step_idx:
+            step_idx = new_idx
+        bar.progress(int(current), text=f"**{step_msgs[step_idx]}**")
+        time.sleep(tick)
 
     thread.join()
-    bar.progress(100, text="**Report ready!**")
-    time.sleep(0.4)
-    bar.empty()
-    note.empty()
 
     if error_box:
+        bar.empty()
         st.error(f"Analysis failed: {error_box['err']}")
         st.stop()
 
-    data = result_box.get("data", {})
-    st.session_state[cache_key] = data
-    return data
+    bar.progress(100, text="**Report ready!**")
+    time.sleep(0.6)
+    bar.empty()
+
+    # Store result then rerun so Streamlit renders the full dashboard cleanly
+    st.session_state[cache_key] = result_box.get("data", {})
+    st.rerun()
 
 def build_pdf(ticker, data, scores, advice, tmp_dir):
     fund, tech, news, pats, anl, peers, social, smart, earnings = (
