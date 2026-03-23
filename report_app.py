@@ -56,9 +56,12 @@ from skills.report_builder         import generate_radar_chart, export_pdf
 st.markdown("""
 <style>
   /* Page background */
-  .stApp { background: #0f1117; }
+  html, body, [data-testid="stAppViewContainer"], .stApp {
+    background-color: #0f1117 !important;
+  }
+  [data-testid="stHeader"] { background: #0f1117 !important; }
 
-  /* Hide default Streamlit header chrome */
+  /* Hide default Streamlit chrome */
   #MainMenu, header, footer { visibility: hidden; }
 
   /* Search bar container */
@@ -198,9 +201,8 @@ def _kpi(label, value):
 def _section(title, body_html):
     return f'<div class="section-card"><div class="section-title">{title}</div><div class="section-body">{body_html}</div></div>'
 
-@st.cache_data(ttl=300, show_spinner=False)
-def run_all_analyses(ticker):
-    # Step 1 — run all 10 data modules in parallel
+def _run_all_analyses(ticker):
+    """Run all analyses + Claude. Called in a background thread."""
     tasks = {
         "meta":        lambda: classify(ticker),
         "fundamental": lambda: fundamental_analyze(ticker),
@@ -223,7 +225,6 @@ def run_all_analyses(ticker):
             except Exception as e:
                 results[name] = {"error": str(e)}
 
-    # Step 2 — Claude AI narrative (needs all module results)
     meta = results.get("meta", {})
     try:
         results["advice"] = generate_recommendation(
@@ -244,6 +245,66 @@ def run_all_analyses(ticker):
         results["advice"] = {"error": str(e)}
 
     return results
+
+
+def run_with_progress(ticker):
+    """Run analyses in background thread, show animated progress bar, cache in session_state."""
+    cache_key = f"data_{ticker}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+
+    result_box = {}
+    error_box  = {}
+
+    def _worker():
+        try:
+            result_box["data"] = _run_all_analyses(ticker)
+        except Exception as e:
+            error_box["err"] = str(e)
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+
+    steps = [
+        (5,  "Fetching live price & market data…"),
+        (14, "Analysing fundamentals — P/E, EPS, revenue growth…"),
+        (23, "Running technical indicators — RSI, MACD, moving averages…"),
+        (32, "Deep-diving earnings history & SEC 8-K filings…"),
+        (41, "Scanning news headlines & media sentiment…"),
+        (50, "Reading social media — StockTwits & Reddit…"),
+        (59, "Tracking smart money — short interest & institutions…"),
+        (67, "Gathering Wall Street analyst consensus…"),
+        (75, "Comparing performance against sector peers…"),
+        (83, "Matching historical price patterns…"),
+        (91, "Generating Claude AI investment recommendation…"),
+        (96, "Compiling your personalised report…"),
+    ]
+
+    bar  = st.progress(0)
+    note = st.empty()
+    idx  = 0
+
+    while thread.is_alive():
+        if idx < len(steps):
+            pct, msg = steps[idx]
+            bar.progress(pct, text=f"**{msg}**")
+            note.caption(f"Step {idx + 1} of {len(steps)}")
+            idx += 1
+        time.sleep(3.5)
+
+    thread.join()
+    bar.progress(100, text="**Report ready!**")
+    time.sleep(0.4)
+    bar.empty()
+    note.empty()
+
+    if error_box:
+        st.error(f"Analysis failed: {error_box['err']}")
+        st.stop()
+
+    data = result_box.get("data", {})
+    st.session_state[cache_key] = data
+    return data
 
 def build_pdf(ticker, data, scores, advice, tmp_dir):
     fund, tech, news, pats, anl, peers, social, smart, earnings = (
@@ -323,8 +384,7 @@ if not go or not ticker_input:
 
 # ── Run analyses ──────────────────────────────────────────────────────────────
 
-with st.spinner("Generating Customized Stock Report…"):
-    data = run_all_analyses(ticker_input)
+data = run_with_progress(ticker_input)
 
 meta     = data.get("meta", {})
 fund     = data.get("fundamental", {})
