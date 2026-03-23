@@ -377,9 +377,15 @@ with col_mid:
     ).upper().strip()
     go = st.button("Analyze", type="primary", use_container_width=True)
 
+# Persist the ticker across reruns (button resets to False on st.rerun())
+if go and ticker_input:
+    st.session_state["active_ticker"] = ticker_input
+
+active_ticker = st.session_state.get("active_ticker", "")
+
 st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
-if not go or not ticker_input:
+if not active_ticker:
     st.markdown("""
     <div style="text-align:center;padding:40px 0;color:#8892b0;">
       <p style="font-size:1rem;">Enter a ticker above and click <strong style="color:#e6edf3;">Analyze</strong> to get started.</p>
@@ -394,7 +400,7 @@ if not go or not ticker_input:
 
 # ── Run analyses ──────────────────────────────────────────────────────────────
 
-data = run_with_progress(ticker_input)
+data = run_with_progress(active_ticker)
 
 meta     = data.get("meta", {})
 fund     = data.get("fundamental", {})
@@ -408,7 +414,7 @@ smart    = data.get("smart_money", {})
 earnings = data.get("earnings", {})
 
 if meta.get("type") == "unknown":
-    st.error(f"Could not find **{ticker_input}**. Please check the symbol.")
+    st.error(f"Could not find **{active_ticker}**. Please check the symbol.")
     st.stop()
 
 itype = meta.get("type", "stock")
@@ -442,7 +448,7 @@ advice = data.get("advice", {})
 hdr_left, hdr_right = st.columns([3, 1])
 
 with hdr_left:
-    st.markdown(f'<p class="co-name">{meta.get("display_name", ticker_input)}</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="co-name">{meta.get("display_name", active_ticker)}</p>', unsafe_allow_html=True)
     meta_parts = []
     if meta.get("sector"):
         meta_parts.append(meta["sector"])
@@ -450,7 +456,7 @@ with hdr_left:
         meta_parts.append(meta["industry"])
     if meta.get("category"):
         meta_parts.append(meta["category"])
-    meta_parts.append(ticker_input)
+    meta_parts.append(active_ticker)
     st.markdown(f'<p class="co-meta">{" · ".join(meta_parts)}</p>', unsafe_allow_html=True)
 
     if price:
@@ -465,11 +471,11 @@ with hdr_right:
         with st.spinner("Building PDF…"):
             tmp_dir = tempfile.mkdtemp(prefix=f"rpt_{uuid.uuid4().hex[:8]}_")
             try:
-                pdf_bytes = build_pdf(ticker_input, data, scores_tuple, advice, tmp_dir)
+                pdf_bytes = build_pdf(active_ticker, data, scores_tuple, advice, tmp_dir)
                 pdf_placeholder.download_button(
                     label="⬇ Download PDF Report",
                     data=pdf_bytes,
-                    file_name=f"{ticker_input}_report.pdf",
+                    file_name=f"{active_ticker}_report.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
@@ -824,7 +830,7 @@ with pat_col:
 
 with rad_col:
     st.markdown("**Score Radar**")
-    radar_path = generate_radar_chart(ticker_input, {
+    radar_path = generate_radar_chart(active_ticker, {
         "Fundamental": fund_score, "Technical": tech_score,
         "News": news_score, "Analyst": anl_score,
         "Peers": peer_score, "Patterns": pat_score,
