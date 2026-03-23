@@ -476,7 +476,7 @@ def _parse_sections(text: str) -> dict:
     current_lines = []
 
     for line in lines:
-        stripped = line.strip().rstrip(":")
+        stripped = line.strip().lstrip("#").strip().rstrip(":")
         if stripped in section_keys:
             if current_key:
                 sections[section_keys[current_key]] = "\n".join(current_lines).strip()

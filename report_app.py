@@ -173,6 +173,10 @@ def _dollar(val, decimals=2):
 def _fmt(val, suffix="", decimals=2):
     return f"{val:.{decimals}f}{suffix}" if val is not None else "N/A"
 
+def _escape_dollars(text):
+    """Escape $ so Streamlit doesn't interpret them as LaTeX math delimiters."""
+    return text.replace("$", "&#36;") if text else ""
+
 def _pattern_to_score(pats):
     if "error" in pats or pats.get("similar_setups_count", 0) == 0:
         return 5
@@ -535,13 +539,13 @@ else:
     rec_col, bc_col, bear_col = st.columns([2, 1, 1])
 
     with rec_col:
-        rec_text = sections.get("recommendation", advice.get("narrative", ""))
+        rec_text = _escape_dollars(sections.get("recommendation", advice.get("narrative", "")))
         st.markdown(
             f'<div class="section-card"><div class="section-title">Recommendation</div>'
             f'<div class="section-body">{rec_text}</div></div>',
             unsafe_allow_html=True,
         )
-        risks = sections.get("risks", "")
+        risks = _escape_dollars(sections.get("risks", ""))
         if risks:
             st.markdown(
                 f'<div class="section-card"><div class="section-title">⚠ Key Risks</div>'
@@ -550,7 +554,7 @@ else:
             )
 
     with bc_col:
-        bull = sections.get("bull_case", "")
+        bull = _escape_dollars(sections.get("bull_case", ""))
         if bull:
             st.markdown(
                 f'<div class="bull-box"><div class="box-title green">🐂 Bull Case</div><p>{bull}</p></div>',
@@ -558,7 +562,7 @@ else:
             )
 
     with bear_col:
-        bear = sections.get("bear_case", "")
+        bear = _escape_dollars(sections.get("bear_case", ""))
         if bear:
             st.markdown(
                 f'<div class="bear-box"><div class="box-title red">🐻 Bear Case</div><p>{bear}</p></div>',
@@ -581,7 +585,7 @@ else:
     ]
     ex_left, ex_right = st.columns(2)
     for i, (key, title) in enumerate(extra_sections):
-        body = sections.get(key, "")
+        body = _escape_dollars(sections.get(key, ""))
         if not body:
             continue
         target = ex_left if i % 2 == 0 else ex_right
@@ -614,8 +618,8 @@ with fd_col:
         else:
             metrics_html = (
                 f'<div class="kpi-stack">'
-                f'{_kpi("P/E Ratio",      str(fund.get("pe_ratio","N/A")))}'
-                f'{_kpi("EPS (TTM)",      str(fund.get("eps","N/A")))}'
+                f'{_kpi("P/E Ratio",      _fmt(fund.get("pe_ratio"), decimals=1))}'
+                f'{_kpi("EPS (TTM)",      _dollar(fund.get("eps")))}'
                 f'{_kpi("Revenue Growth", _pct(fund.get("revenue_growth")))}'
                 f'{_kpi("Profit Margin",  _pct(fund.get("profit_margin")))}'
                 f'{_kpi("Debt / Equity",  str(fund.get("debt_to_equity","N/A")))}'
@@ -636,7 +640,7 @@ with tc_col:
             st.image(chart_path, use_container_width=True)
         metrics_html = (
             f'<div class="kpi-stack">'
-            f'{_kpi("RSI (14)",  str(tech.get("rsi","N/A")))}'
+            f'{_kpi("RSI (14)",  _fmt(tech.get("rsi"), decimals=1))}'
             f'{_kpi("MACD",      _fmt(tech.get("macd"), decimals=3))}'
             f'{_kpi("MA 50",     _dollar(tech.get("ma50")))}'
             f'{_kpi("MA 200",    _dollar(tech.get("ma200")))}'
@@ -661,7 +665,7 @@ if "error" not in earnings:
     fwd = earnings.get("forward_data", {}) or {}
     e1, e2, e3, e4 = st.columns(4)
     e1.metric("Next Earnings",  earnings.get("next_earnings_date", "N/A"))
-    e2.metric("Forward EPS",    str(fwd.get("forward_eps", "N/A")))
+    e2.metric("Forward EPS",    _dollar(fwd.get("forward_eps")))
     e3.metric("Forward P/E",    _fmt(fwd.get("forward_pe"), decimals=1))
     e4.metric("EPS Growth Fwd", _pct(fwd.get("eps_growth_fwd")))
 
