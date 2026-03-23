@@ -1,0 +1,8 @@
+.env
+*.env
+.claude/
+node_modules/
+__pycache__/
+*.log
+secrets/
+venv/

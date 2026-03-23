@@ -1,0 +1,21 @@
+# Secrets
+.env
+*.env
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+
+# Generated files (charts, PDFs, caches)
+data/*.png
+data/*.pdf
+data/sec_cik_cache.json
+
+# Logs / IDE
+*.log
+.claude/
+node_modules/
+.vscode/

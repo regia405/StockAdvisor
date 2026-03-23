@@ -1,0 +1,16 @@
+{
+  "holdings": [
+    {
+      "ticker": "AAPL",
+      "shares": 10,
+      "buy_price": 150.0,
+      "buy_date": "2025-01-15"
+    },
+    {
+      "ticker": "MSFT",
+      "shares": 5,
+      "buy_price": 350.0,
+      "buy_date": "2025-02-20"
+    }
+  ]
+}
