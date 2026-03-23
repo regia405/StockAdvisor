@@ -200,6 +200,7 @@ def _section(title, body_html):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def run_all_analyses(ticker):
+    # Step 1 — run all 10 data modules in parallel
     tasks = {
         "meta":        lambda: classify(ticker),
         "fundamental": lambda: fundamental_analyze(ticker),
@@ -221,6 +222,27 @@ def run_all_analyses(ticker):
                 results[name] = future.result()
             except Exception as e:
                 results[name] = {"error": str(e)}
+
+    # Step 2 — Claude AI narrative (needs all module results)
+    meta = results.get("meta", {})
+    try:
+        results["advice"] = generate_recommendation(
+            ticker=ticker,
+            instrument_type=meta.get("type", "stock"),
+            instrument_meta=meta,
+            fundamental=results.get("fundamental", {}),
+            technical=results.get("technical", {}),
+            news=results.get("news", {}),
+            patterns=results.get("patterns", {}),
+            analyst=results.get("analyst"),
+            peers=results.get("peers"),
+            social=results.get("social"),
+            smart_money=results.get("smart_money"),
+            earnings=results.get("earnings"),
+        )
+    except Exception as e:
+        results["advice"] = {"error": str(e)}
+
     return results
 
 def build_pdf(ticker, data, scores, advice, tmp_dir):
@@ -301,7 +323,7 @@ if not go or not ticker_input:
 
 # ── Run analyses ──────────────────────────────────────────────────────────────
 
-with st.spinner(f"Running analysis for **{ticker_input}**…"):
+with st.spinner("Generating Customized Stock Report…"):
     data = run_all_analyses(ticker_input)
 
 meta     = data.get("meta", {})
@@ -342,15 +364,7 @@ signal_label, signal_class = _signal(combined)
 price = fund.get("current_price") or tech.get("current_price")
 
 
-# ── Claude AI (runs separately so we can show dashboard first) ────────────────
-
-with st.spinner("Generating Claude AI recommendation…"):
-    advice = generate_recommendation(
-        ticker=ticker_input, instrument_type=itype, instrument_meta=meta,
-        fundamental=fund, technical=tech, news=news, patterns=pats,
-        analyst=anl, peers=peers, social=social, smart_money=smart,
-        earnings=earnings,
-    )
+advice = data.get("advice", {})
 
 
 # ── Company header + PDF button ───────────────────────────────────────────────
