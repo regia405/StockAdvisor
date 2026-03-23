@@ -344,25 +344,33 @@ def generate_recommendation(ticker: str, instrument_type: str,
     if technical.get("volatility") is not None:
         technical["volatility_pct"] = f"{technical['volatility'] * 100:.2f}%"
 
-    prompt = _build_prompt(
-        ticker, instrument_type, instrument_meta,
-        fundamental, technical, news, patterns,
-        analyst=analyst, peers=peers,
-        social=social, smart_money=smart_money,
-        earnings=earnings,
-    )
+    try:
+        prompt = _build_prompt(
+            ticker, instrument_type, instrument_meta,
+            fundamental, technical, news, patterns,
+            analyst=analyst, peers=peers,
+            social=social, smart_money=smart_money,
+            earnings=earnings,
+        )
+    except Exception as e:
+        import traceback
+        return {
+            "error": f"Prompt build failed: {e}\n{traceback.format_exc()}",
+            "summary": f"Claude Advisor: prompt build failed — {e}",
+        }
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=2200,
+            max_tokens=2400,
             messages=[{"role": "user", "content": prompt}],
         )
         narrative = message.content[0].text
     except Exception as e:
+        import traceback
         return {
-            "error": str(e),
+            "error": f"{e}\n{traceback.format_exc()}",
             "summary": f"Claude Advisor: API call failed — {e}",
         }
 

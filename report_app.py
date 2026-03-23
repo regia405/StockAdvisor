@@ -170,7 +170,7 @@ def generate_report(ticker: str, tmp_dir: str) -> bytes:
         "Analyst Consensus":      anl.get("summary", ""),
         "Peer Comparison":        peers.get("summary", ""),
         "Historical Patterns":    pats.get("summary", ""),
-        "Claude AI Recommendation": advice.get("narrative", ""),
+        "Claude AI Recommendation": advice.get("narrative") or advice.get("error", "Claude analysis unavailable."),
     }
     charts = [p for p in [chart_path, radar_path] if p and os.path.exists(p)]
     pdf_path = export_pdf(ticker, sections, charts, output_dir=tmp_dir)
