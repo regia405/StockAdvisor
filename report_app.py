@@ -402,6 +402,10 @@ if not active_ticker:
 
 data = run_with_progress(active_ticker)
 
+if not data:
+    st.error("No data returned. Please try again.")
+    st.stop()
+
 meta     = data.get("meta", {})
 fund     = data.get("fundamental", {})
 tech     = data.get("technical", {})
@@ -466,21 +470,27 @@ with hdr_left:
 
 with hdr_right:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    pdf_placeholder = st.empty()
-    with pdf_placeholder.container():
-        with st.spinner("Building PDF…"):
-            tmp_dir = tempfile.mkdtemp(prefix=f"rpt_{uuid.uuid4().hex[:8]}_")
-            try:
-                pdf_bytes = build_pdf(active_ticker, data, scores_tuple, advice, tmp_dir)
-                pdf_placeholder.download_button(
-                    label="⬇ Download PDF Report",
-                    data=pdf_bytes,
-                    file_name=f"{active_ticker}_report.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-            except Exception as e:
-                pdf_placeholder.warning(f"PDF error: {e}")
+    pdf_key = f"pdf_{active_ticker}"
+
+    if pdf_key in st.session_state:
+        # Already built — show download button directly
+        st.download_button(
+            label="⬇ Download PDF Report",
+            data=st.session_state[pdf_key],
+            file_name=f"{active_ticker}_report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    else:
+        if st.button("📄 Generate PDF Report", use_container_width=True):
+            with st.spinner("Building PDF…"):
+                try:
+                    tmp_dir = tempfile.mkdtemp(prefix=f"rpt_{uuid.uuid4().hex[:8]}_")
+                    pdf_bytes = build_pdf(active_ticker, data, scores_tuple, advice, tmp_dir)
+                    st.session_state[pdf_key] = pdf_bytes
+                    st.rerun()
+                except Exception as e:
+                    st.warning(f"PDF error: {e}")
 
 st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
