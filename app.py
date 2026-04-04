@@ -72,6 +72,157 @@ def _signal_label(score: float) -> str:
     return                  "🔴 AVOID"
 
 
+def _render_summary(title: str, text: str, accent: str = "#4fc3f7") -> None:
+    """Parse structured summary text into a rich HTML card."""
+    import re
+
+    def _score_bar(score_str: str) -> str:
+        """Turn '7 / 10' into a coloured progress bar."""
+        m = re.search(r"(\d+(?:\.\d+)?)\s*/\s*10", score_str)
+        if not m:
+            return f"<span style='color:#e6edf3;font-weight:700;'>{score_str}</span>"
+        val = float(m.group(1))
+        pct = val * 10
+        color = "#2ecc71" if val >= 7 else "#f1c40f" if val >= 4 else "#ef5350"
+        return (
+            f"<span style='color:{color};font-weight:700;'>{score_str}</span>"
+            f"<div style='background:#2d3250;border-radius:4px;height:6px;margin-top:4px;'>"
+            f"<div style='background:{color};width:{pct}%;height:6px;border-radius:4px;'></div></div>"
+        )
+
+    def _fmt_line(line: str) -> str:
+        """Format a single key: value line into a styled row."""
+        # URL lines
+        if line.strip().startswith("http"):
+            url = line.strip()
+            return f"<a href='{url}' target='_blank' style='color:#4fc3f7;font-size:0.78rem;word-break:break-all;'>{url}</a>"
+        # Numbered headline lines like "  1. [+] Title\n     url"
+        m = re.match(r"^\s*(\d+)\.\s*\[([=+\-])\]\s*(.+)", line)
+        if m:
+            num, sentiment, headline_text = m.group(1), m.group(2), m.group(3).strip()
+            dot = "<span style='color:#2ecc71;'>●</span>" if sentiment == "+" else \
+                  "<span style='color:#ef5350;'>●</span>" if sentiment == "-" else \
+                  "<span style='color:#8892b0;'>●</span>"
+            return f"<div style='padding:4px 0;border-bottom:1px solid #2d3250;font-size:0.85rem;'>{dot} {headline_text}</div>"
+        # Key : Value lines
+        if ":" in line and not line.strip().startswith("*") and not line.strip().startswith("-"):
+            parts = line.split(":", 1)
+            key = parts[0].strip().lstrip("- ")
+            val = parts[1].strip() if len(parts) > 1 else ""
+            if not key or not val:
+                return f"<div style='color:#8892b0;font-size:0.82rem;padding:1px 0;'>{line}</div>"
+            # Score lines get a bar
+            if "score" in key.lower() or "/ 10" in val:
+                return (
+                    f"<div style='display:flex;justify-content:space-between;align-items:flex-start;"
+                    f"padding:5px 0;border-bottom:1px solid #2d3250;'>"
+                    f"<span style='color:#8892b0;font-size:0.8rem;min-width:140px;'>{key}</span>"
+                    f"<div style='flex:1;text-align:right;'>{_score_bar(val)}</div></div>"
+                )
+            return (
+                f"<div style='display:flex;justify-content:space-between;align-items:center;"
+                f"padding:4px 0;border-bottom:1px solid #1e2130;'>"
+                f"<span style='color:#8892b0;font-size:0.8rem;min-width:140px;'>{key}</span>"
+                f"<span style='color:#e6edf3;font-size:0.88rem;font-weight:500;text-align:right;'>{val}</span></div>"
+            )
+        # Bullet / star lines
+        if line.strip().startswith(("*", "-", "•")):
+            content = line.strip().lstrip("*-• ").strip()
+            return f"<div style='padding:3px 0 3px 12px;color:#c9d1d9;font-size:0.85rem;border-left:2px solid {accent};margin:2px 0;'>{content}</div>"
+        # Table separator lines
+        if re.match(r"^[-= ]+$", line.strip()):
+            return ""
+        # Section sub-headers (ALL CAPS lines or lines ending with :)
+        stripped = line.strip()
+        if stripped and (stripped.isupper() or (stripped.endswith(":") and len(stripped) < 40 and not ":" in stripped[:-1])):
+            return f"<div style='color:{accent};font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin:10px 0 4px;'>{stripped.rstrip(':')}</div>"
+        # Plain text
+        if stripped:
+            return f"<div style='color:#c9d1d9;font-size:0.85rem;padding:2px 0;'>{stripped}</div>"
+        return "<div style='height:6px;'></div>"
+
+    lines = text.splitlines()
+    # Skip the title line (first line) and the === separator
+    body_lines = []
+    skip_next = False
+    for i, line in enumerate(lines):
+        if i == 0:  # title line — skip, we use our own
+            continue
+        if re.match(r"^[=\-]{4,}", line.strip()):
+            continue
+        if "not financial advice" in line.lower():
+            continue
+        if "chart saved to" in line.lower():
+            continue
+        body_lines.append(_fmt_line(line))
+
+    body_html = "\n".join(body_lines)
+
+    st.markdown(
+        f"""
+        <div style="background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;
+                    margin-bottom:16px;overflow:hidden;">
+          <div style="background:linear-gradient(90deg,{accent}22,transparent);
+                      border-bottom:1px solid {accent}33;padding:12px 18px;
+                      display:flex;align-items:center;gap:8px;">
+            <span style="color:{accent};font-weight:700;font-size:0.8rem;
+                         text-transform:uppercase;letter-spacing:0.1em;">{title}</span>
+          </div>
+          <div style="padding:14px 18px;">{body_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _ai_section_card(title: str, body: str, accent: str = "#4fc3f7") -> None:
+    """Render an AI narrative section — prose text with markdown bold support."""
+    import re
+    # Escape HTML then restore bold markdown as <strong>
+    safe = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = re.sub(r"\*\*(.+?)\*\*", r"<strong style='color:#e6edf3;'>\1</strong>", safe)
+    # Bullet lines get left-border treatment
+    lines_out = []
+    for line in safe.splitlines():
+        s = line.strip()
+        if not s:
+            lines_out.append("<div style='height:5px;'></div>")
+        elif s.startswith(("- ", "* ", "• ")):
+            content = s.lstrip("-*• ")
+            lines_out.append(
+                f"<div style='padding:3px 0 3px 12px;border-left:2px solid {accent}55;"
+                f"color:#c9d1d9;font-size:0.88rem;margin:2px 0;'>{content}</div>"
+            )
+        elif re.match(r"^\d+\.", s):
+            content = re.sub(r"^\d+\.\s*", "", s)
+            lines_out.append(
+                f"<div style='padding:3px 0 3px 12px;border-left:2px solid {accent}55;"
+                f"color:#c9d1d9;font-size:0.88rem;margin:2px 0;'>{content}</div>"
+            )
+        else:
+            lines_out.append(f"<div style='color:#c9d1d9;font-size:0.88rem;line-height:1.7;padding:2px 0;'>{s}</div>")
+    body_html = "\n".join(lines_out)
+    st.markdown(
+        f"""
+        <div style="background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;
+                    margin-bottom:12px;overflow:hidden;">
+          <div style="background:linear-gradient(90deg,{accent}22,transparent);
+                      border-bottom:1px solid {accent}33;padding:10px 16px;">
+            <span style="color:{accent};font-weight:700;font-size:0.78rem;
+                         text-transform:uppercase;letter-spacing:0.1em;">{title}</span>
+          </div>
+          <div style="padding:14px 16px;">{body_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _section_card(title: str, body: str, accent: str = "#4fc3f7") -> None:
+    """Render a styled dark card for structured skill summaries."""
+    _render_summary(title, body, accent)
+
+
 def _pattern_to_score(pats: dict) -> int:
     if "error" in pats or pats.get("similar_setups_count", 0) == 0:
         return 5
@@ -351,23 +502,31 @@ with tab_claude:
 
         # Remaining sections in expanders
         section_display = [
-            ("fundamental",  "📊 Fundamental Analysis"),
-            ("technical",    "📈 Technical Analysis"),
-            ("earnings",     "💰 Earnings Analysis"),
-            ("management",   "🗣️ Management Highlights"),
-            ("news_media",   "📰 News Media Sentiment"),
-            ("social",       "💬 Social Media Sentiment"),
-            ("smart_money",  "🐋 Smart Money Activity"),
-            ("analyst",      "🎯 Analyst View"),
-            ("peers",        "🏁 Peer Standing"),
-            ("patterns",     "🔍 Historical Patterns"),
-            ("risks",        "⚠️ Key Risks"),
-            ("confidence",   "🎯 Confidence"),
+            ("fundamental",  "📊 Fundamental Analysis",  "#4fc3f7"),
+            ("technical",    "📈 Technical Analysis",    "#4fc3f7"),
+            ("earnings",     "💰 Earnings Analysis",     "#4fc3f7"),
+            ("management",   "🗣️ Management Highlights",  "#ab47bc"),
+            ("news_media",   "📰 News Media Sentiment",  "#ffb300"),
+            ("social",       "💬 Social Media Sentiment","#ffb300"),
+            ("smart_money",  "🐋 Smart Money Activity",  "#26a69a"),
+            ("analyst",      "🎯 Analyst View",           "#26a69a"),
+            ("peers",        "🏁 Peer Standing",          "#26a69a"),
+            ("patterns",     "🔍 Historical Patterns",   "#ab47bc"),
+            ("risks",        "⚠️ Key Risks",              "#ef5350"),
+            ("confidence",   "🎯 Confidence",             "#4fc3f7"),
         ]
-        for key, title in section_display:
-            if sections.get(key):
-                with st.expander(title, expanded=False):
-                    st.markdown(sections[key])
+        # Render in 2-column grid
+        left_secs  = [(k, t, a) for i, (k, t, a) in enumerate(section_display) if i % 2 == 0]
+        right_secs = [(k, t, a) for i, (k, t, a) in enumerate(section_display) if i % 2 == 1]
+        gc1, gc2 = st.columns(2)
+        with gc1:
+            for key, title, accent in left_secs:
+                if sections.get(key):
+                    _ai_section_card(title, sections[key], accent)
+        with gc2:
+            for key, title, accent in right_secs:
+                if sections.get(key):
+                    _ai_section_card(title, sections[key], accent)
 
     if export_pdf_btn:
         with st.spinner("Exporting PDF…"):
@@ -423,8 +582,7 @@ with tab_fund:
             c3.metric("Debt/Equity",    str(fund.get("debt_to_equity", "N/A")))
 
         st.metric("Fundamental Score", f"{fund_score} / 10")
-        with st.expander("Full report"):
-            st.text(fund.get("summary", ""))
+        _section_card("📊 Fundamental Report", fund.get("summary", ""), "#4fc3f7")
 
 
 # ── Technical tab ─────────────────────────────────────────────────────────────
@@ -562,8 +720,7 @@ with tab_tech:
         c3.metric("MA 50",      f"${tech['ma50']:.2f}" if tech.get("ma50") else "N/A")
         c4.metric("MA 200",     f"${tech['ma200']:.2f}" if tech.get("ma200") else "N/A")
         st.metric("Technical Score", f"{tech_score} / 10")
-        with st.expander("Full report"):
-            st.text(tech.get("summary", ""))
+        _section_card("📈 Technical Report", tech.get("summary", ""), "#4fc3f7")
 
 
 # ── Earnings tab ──────────────────────────────────────────────────────────────
@@ -618,8 +775,17 @@ with tab_earn:
         # Press release excerpt
         press = earnings.get("press_release_excerpt", "")
         if press:
-            with st.expander("📄 SEC 8-K Press Release Excerpt (Management Commentary)"):
-                st.text(press[:3000])
+            # Strip SEC filing header noise — find first real paragraph
+            import re as _re
+            lines_p = [l.strip() for l in press.splitlines() if l.strip()]
+            # Skip lines that look like filing metadata (short caps lines, exhibit refs)
+            start = 0
+            for i, l in enumerate(lines_p):
+                if len(l) > 80 and not l.isupper():
+                    start = i
+                    break
+            clean_press = " ".join(lines_p[start:start+12])[:900]
+            _section_card("📄 SEC 8-K Management Commentary", clean_press, "#ab47bc")
 
         st.metric("Earnings Score", f"{earn_score} / 10")
 
@@ -637,18 +803,32 @@ with tab_news:
 
         headlines = news.get("headlines", [])
         if headlines:
-            st.markdown("**Headlines**")
+            headlines_html = ""
             for h in headlines[:10]:
                 sent = h.get("sentiment", "neutral")
-                icon = "🟢" if sent == "positive" else "🔴" if sent == "negative" else "⚪"
-                url  = h.get("url", "")
-                title = h.get("title", "")
-                if url:
-                    st.markdown(f"{icon} [{title}]({url})")
-                else:
-                    st.markdown(f"{icon} {title}")
-        with st.expander("Full report"):
-            st.text(news.get("summary", ""))
+                dot = "<span style='color:#2ecc71;font-size:1rem;'>●</span>" if sent == "positive" else \
+                      "<span style='color:#ef5350;font-size:1rem;'>●</span>" if sent == "negative" else \
+                      "<span style='color:#8892b0;font-size:1rem;'>●</span>"
+                url   = h.get("url", "")
+                htitle = h.get("title", "")
+                src   = h.get("source", "")
+                link  = f"<a href='{url}' target='_blank' style='color:#e6edf3;text-decoration:none;'>{htitle}</a>" if url else htitle
+                src_tag = f"<span style='color:#8892b0;font-size:0.75rem;margin-left:6px;'>{src}</span>" if src else ""
+                headlines_html += (
+                    f"<div style='display:flex;gap:8px;align-items:flex-start;padding:7px 0;"
+                    f"border-bottom:1px solid #2d3250;'>"
+                    f"<div style='margin-top:3px;'>{dot}</div>"
+                    f"<div style='font-size:0.87rem;line-height:1.5;'>{link}{src_tag}</div></div>"
+                )
+            st.markdown(
+                f"<div style='background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;"
+                f"padding:14px 18px;margin-bottom:16px;'>"
+                f"<div style='color:#ffb300;font-weight:700;font-size:0.78rem;text-transform:uppercase;"
+                f"letter-spacing:0.1em;margin-bottom:10px;'>📰 Headlines</div>"
+                f"{headlines_html}</div>",
+                unsafe_allow_html=True,
+            )
+        _section_card("📰 News Report", news.get("summary", ""), "#ffb300")
 
 
 # ── Social tab ────────────────────────────────────────────────────────────────
@@ -671,16 +851,34 @@ with tab_social:
 
         posts = social.get("top_posts", [])
         if posts:
-            st.markdown("**Sample Posts**")
+            posts_html = ""
             for p in posts:
                 sent = p.get("sentiment", "neutral")
-                icon = "🟢" if sent == "bullish" else "🔴" if sent == "bearish" else "⚪"
-                src  = p.get("source", "")
-                age  = f" · {p['age_days']}d ago" if p.get("age_days") is not None else ""
-                st.markdown(f"{icon} **[{src}]**{age}  {p.get('text','')[:100]}")
+                sent_color = "#2ecc71" if sent == "bullish" else "#ef5350" if sent == "bearish" else "#8892b0"
+                src = p.get("source", "")
+                age = f"{p['age_days']}d ago" if p.get("age_days") is not None else ""
+                text = p.get("text", "")[:160].replace("<", "&lt;").replace(">", "&gt;")
+                plat_color = "#4fc3f7" if "stocktwits" in src.lower() else "#ff6314" if "reddit" in src.lower() else "#8892b0"
+                posts_html += (
+                    f"<div style='padding:10px 0;border-bottom:1px solid #2d3250;'>"
+                    f"<div style='display:flex;align-items:center;gap:6px;margin-bottom:5px;'>"
+                    f"<span style='background:{plat_color}22;color:{plat_color};font-size:0.72rem;"
+                    f"font-weight:700;padding:2px 8px;border-radius:4px;'>{src}</span>"
+                    f"<span style='background:{sent_color}22;color:{sent_color};font-size:0.7rem;"
+                    f"font-weight:600;padding:2px 8px;border-radius:4px;'>{sent.upper()}</span>"
+                    f"<span style='color:#8892b0;font-size:0.72rem;'>{age}</span></div>"
+                    f"<div style='color:#c9d1d9;font-size:0.85rem;line-height:1.5;'>{text}</div></div>"
+                )
+            st.markdown(
+                f"<div style='background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;"
+                f"padding:14px 18px;margin-bottom:16px;'>"
+                f"<div style='color:#ffb300;font-weight:700;font-size:0.78rem;text-transform:uppercase;"
+                f"letter-spacing:0.1em;margin-bottom:4px;'>💬 Sample Posts</div>"
+                f"{posts_html}</div>",
+                unsafe_allow_html=True,
+            )
 
-        with st.expander("Full report"):
-            st.text(social.get("summary", ""))
+        _section_card("💬 Social Report", social.get("summary", ""), "#ffb300")
 
 
 # ── Smart Money tab ───────────────────────────────────────────────────────────
@@ -714,12 +912,21 @@ with tab_smart:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
         if opts.get("unusual_activity"):
-            st.markdown("**Unusual Options Activity**")
-            for ua in opts["unusual_activity"]:
-                st.code(ua)
+            ua_html = "".join(
+                f"<div style='padding:5px 0;border-bottom:1px solid #2d3250;font-size:0.83rem;"
+                f"font-family:monospace;color:#4fc3f7;'>{ua}</div>"
+                for ua in opts["unusual_activity"]
+            )
+            st.markdown(
+                f"<div style='background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;"
+                f"padding:14px 18px;margin-bottom:16px;'>"
+                f"<div style='color:#26a69a;font-weight:700;font-size:0.78rem;text-transform:uppercase;"
+                f"letter-spacing:0.1em;margin-bottom:10px;'>⚡ Unusual Options Activity</div>"
+                f"{ua_html}</div>",
+                unsafe_allow_html=True,
+            )
 
-        with st.expander("Full report"):
-            st.text(smart.get("summary", ""))
+        _section_card("🐋 Smart Money Report", smart.get("summary", ""), "#26a69a")
 
 
 # ── Analyst tab ───────────────────────────────────────────────────────────────
@@ -736,8 +943,7 @@ with tab_analyst:
         c3.metric("# Analysts",    str(anl.get("num_analysts", "N/A")))
         c4.metric("Next Earnings", str(anl.get("next_earnings_date", "N/A")))
         st.metric("Analyst Score", f"{anl_score} / 10")
-        with st.expander("Full report"):
-            st.text(anl.get("summary", ""))
+        _section_card("🎯 Analyst Report", anl.get("summary", ""), "#26a69a")
 
 
 # ── Peers tab ─────────────────────────────────────────────────────────────────
@@ -761,8 +967,37 @@ with tab_peers:
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.metric("Peer Score", f"{peer_score} / 10")
-        with st.expander("Full report"):
-            st.text(peers.get("summary", ""))
+        # Build a rich peer comparison table from structured data
+        if peer_data:
+            headers = ["Ticker", "P/E", "Rev Growth", "Profit Margin", "52W Return"]
+            hdr_html = "".join(f"<th style='color:#8892b0;font-size:0.75rem;font-weight:600;"
+                               f"text-transform:uppercase;letter-spacing:0.06em;"
+                               f"padding:8px 12px;border-bottom:1px solid #2d3250;"
+                               f"text-align:right;'>{h}</th>" for h in headers)
+            rows_html = ""
+            for p in peer_data:
+                pe    = f"{p['pe_ratio']:.1f}" if p.get('pe_ratio') else "N/A"
+                rev   = f"{p['revenue_growth']*100:+.1f}%" if p.get('revenue_growth') is not None else "N/A"
+                margin = f"{p['profit_margin']*100:.1f}%" if p.get('profit_margin') is not None else "N/A"
+                ret52 = f"{p['week52_return']*100:+.1f}%" if p.get('week52_return') is not None else "N/A"
+                ret_color = "#2ecc71" if p.get('week52_return', 0) >= 0 else "#ef5350"
+                ticker_cell = (f"<td style='color:#4fc3f7;font-weight:700;font-size:0.88rem;"
+                               f"padding:7px 12px;border-bottom:1px solid #1e2130;'>{p.get('ticker','?')}</td>")
+                def _cell(val, color="#e6edf3"):
+                    return (f"<td style='color:{color};font-size:0.85rem;padding:7px 12px;"
+                            f"border-bottom:1px solid #1e2130;text-align:right;'>{val}</td>")
+                rows_html += (f"<tr>{ticker_cell}{_cell(pe)}{_cell(rev)}"
+                              f"{_cell(margin)}{_cell(ret52, ret_color)}</tr>")
+            st.markdown(
+                f"<div style='background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;"
+                f"padding:14px 18px;margin-top:12px;overflow-x:auto;'>"
+                f"<div style='color:#26a69a;font-weight:700;font-size:0.78rem;text-transform:uppercase;"
+                f"letter-spacing:0.1em;margin-bottom:10px;'>🏁 Peer Comparison</div>"
+                f"<table style='width:100%;border-collapse:collapse;'>"
+                f"<thead><tr>{hdr_html}</tr></thead>"
+                f"<tbody>{rows_html}</tbody></table></div>",
+                unsafe_allow_html=True,
+            )
 
 
 # ── Patterns tab ──────────────────────────────────────────────────────────────
@@ -782,12 +1017,23 @@ with tab_patterns:
 
         named = pats.get("named_patterns", [])
         if named:
-            st.markdown("**Detected Patterns**")
-            for name, desc in named:
-                st.info(f"**{name}** — {desc}")
+            named_html = "".join(
+                f"<div style='padding:6px 0 6px 12px;border-left:3px solid #ab47bc;"
+                f"margin:4px 0;'>"
+                f"<span style='color:#ce93d8;font-weight:600;font-size:0.85rem;'>{n}</span>"
+                f"<div style='color:#c9d1d9;font-size:0.82rem;margin-top:2px;'>{d}</div></div>"
+                for n, d in named
+            )
+            st.markdown(
+                f"<div style='background:#1a1d2e;border:1px solid #2d3250;border-radius:12px;"
+                f"padding:14px 18px;margin-bottom:16px;'>"
+                f"<div style='color:#ab47bc;font-weight:700;font-size:0.78rem;text-transform:uppercase;"
+                f"letter-spacing:0.1em;margin-bottom:10px;'>🔍 Detected Patterns</div>"
+                f"{named_html}</div>",
+                unsafe_allow_html=True,
+            )
 
-        with st.expander("Full report"):
-            st.text(pats.get("summary", ""))
+        _section_card("🔍 Pattern Report", pats.get("summary", ""), "#ab47bc")
 
 
 # ── Radar tab ─────────────────────────────────────────────────────────────────
