@@ -320,10 +320,34 @@ with tab_claude:
         bc, cc = st.columns(2)
         with bc:
             if sections.get("bull_case"):
-                st.success(f"**🐂 BULL CASE**\n\n{sections['bull_case']}")
+                st.markdown(
+                    f"""
+                    <div style="background:#0d3b2e;border:1px solid #2ecc71;border-radius:8px;
+                                padding:16px;height:100%;">
+                    <div style="color:#2ecc71;font-weight:700;font-size:0.8rem;
+                                text-transform:uppercase;letter-spacing:0.08em;
+                                margin-bottom:8px;">🐂 Bull Case</div>
+                    <div style="color:#c9d1d9;font-size:0.9rem;line-height:1.7;
+                                white-space:pre-wrap;word-wrap:break-word;">{sections['bull_case']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
         with cc:
             if sections.get("bear_case"):
-                st.error(f"**🐻 BEAR CASE**\n\n{sections['bear_case']}")
+                st.markdown(
+                    f"""
+                    <div style="background:#3b0a0a;border:1px solid #e74c3c;border-radius:8px;
+                                padding:16px;height:100%;">
+                    <div style="color:#e74c3c;font-weight:700;font-size:0.8rem;
+                                text-transform:uppercase;letter-spacing:0.08em;
+                                margin-bottom:8px;">🐻 Bear Case</div>
+                    <div style="color:#c9d1d9;font-size:0.9rem;line-height:1.7;
+                                white-space:pre-wrap;word-wrap:break-word;">{sections['bear_case']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
         # Remaining sections in expanders
         section_display = [
