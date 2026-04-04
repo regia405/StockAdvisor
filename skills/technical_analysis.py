@@ -301,7 +301,7 @@ def analyze(ticker: str, output_dir: str = "data") -> dict:
     # --- Fetch historical data from yfinance --------------------------------
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="1y")  # 1 year of data
+        hist = stock.history(period="2y")  # 2 years of daily data
         
         if hist.empty:
             return {
@@ -390,6 +390,7 @@ def analyze(ticker: str, output_dir: str = "data") -> dict:
         "technical_score":  score,
         "chart_path":       chart_path,
         "summary":          summary,
+        "hist":             hist,
     }
 
 

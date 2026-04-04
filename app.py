@@ -72,33 +72,6 @@ def _signal_label(score: float) -> str:
     return                  "🔴 AVOID"
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def run_all_analyses(ticker: str) -> dict:
-    """Run all 9 analysis modules in parallel and return combined results dict."""
-    tasks = {
-        "meta":        lambda: classify(ticker),
-        "fundamental": lambda: fundamental_analyze(ticker),
-        "technical":   lambda: technical_analyze(ticker),
-        "news":        lambda: news_analyze(ticker),
-        "patterns":    lambda: pattern_analyze(ticker),
-        "analyst":     lambda: analyst_analyze(ticker),
-        "peers":       lambda: peer_analyze(ticker),
-        "social":      lambda: social_analyze(ticker),
-        "smart_money": lambda: smart_money_analyze(ticker),
-        "earnings":    lambda: earnings_analyze(ticker),
-    }
-    results = {}
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(fn): name for name, fn in tasks.items()}
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                results[name] = future.result()
-            except Exception as e:
-                results[name] = {"error": str(e)}
-    return results
-
-
 def _pattern_to_score(pats: dict) -> int:
     if "error" in pats or pats.get("similar_setups_count", 0) == 0:
         return 5
@@ -106,6 +79,58 @@ def _pattern_to_score(pats: dict) -> int:
     avg20 = pats.get("avg_return_20d") or 0
     score = int(wr20 * 6 + min(max(avg20 * 100, -3), 3) + 2)
     return max(0, min(10, score))
+
+
+def _get_analyses(ticker: str) -> dict:
+    """Run all 9 modules once per ticker, cached in session_state."""
+    key = f"analyses_{ticker}"
+    if key not in st.session_state:
+        tasks = {
+            "meta":        lambda: classify(ticker),
+            "fundamental": lambda: fundamental_analyze(ticker),
+            "technical":   lambda: technical_analyze(ticker),
+            "news":        lambda: news_analyze(ticker),
+            "patterns":    lambda: pattern_analyze(ticker),
+            "analyst":     lambda: analyst_analyze(ticker),
+            "peers":       lambda: peer_analyze(ticker),
+            "social":      lambda: social_analyze(ticker),
+            "smart_money": lambda: smart_money_analyze(ticker),
+            "earnings":    lambda: earnings_analyze(ticker),
+        }
+        results = {}
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(fn): name for name, fn in tasks.items()}
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    results[name] = future.result()
+                except Exception as e:
+                    results[name] = {"error": str(e)}
+        st.session_state[key] = results
+    return st.session_state[key]
+
+
+def _get_advice(ticker: str, provider: str, data: dict) -> dict:
+    """Run AI recommendation once per ticker+provider, cached in session_state."""
+    key = f"advice_{ticker}_{provider}"
+    if key not in st.session_state:
+        meta = data.get("meta", {})
+        st.session_state[key] = generate_recommendation(
+            ticker=ticker,
+            instrument_type=meta.get("type", "stock"),
+            instrument_meta=meta,
+            fundamental=data.get("fundamental", {}),
+            technical=data.get("technical", {}),
+            news=data.get("news", {}),
+            patterns=data.get("patterns", {}),
+            analyst=data.get("analyst"),
+            peers=data.get("peers"),
+            social=data.get("social"),
+            smart_money=data.get("smart_money"),
+            earnings=data.get("earnings"),
+            provider=provider,
+        )
+    return st.session_state[key]
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -149,7 +174,12 @@ with st.sidebar:
 
 st.title("📊 Stock Advisor")
 
-if not analyze_btn or not ticker_input:
+if analyze_btn and ticker_input:
+    st.session_state["analyzed_ticker"] = ticker_input
+
+active_ticker = st.session_state.get("analyzed_ticker", "")
+
+if not active_ticker:
     st.markdown(
         """
         ### Welcome
@@ -170,8 +200,8 @@ if not analyze_btn or not ticker_input:
 
 # ── Run analyses ──────────────────────────────────────────────────────────────
 
-with st.spinner(f"Running 9 analyses for **{ticker_input}** in parallel…"):
-    data = run_all_analyses(ticker_input)
+with st.spinner(f"Running 9 analyses for **{active_ticker}**…"):
+    data = _get_analyses(active_ticker)
 
 meta     = data.get("meta", {})
 fund     = data.get("fundamental", {})
@@ -185,7 +215,7 @@ smart    = data.get("smart_money", {})
 earnings = data.get("earnings", {})
 
 if meta.get("type") == "unknown":
-    st.error(f"Could not identify ticker **{ticker_input}**. Please check the symbol.")
+    st.error(f"Could not identify ticker **{active_ticker}**. Please check the symbol.")
     st.stop()
 
 # ── Instrument header ─────────────────────────────────────────────────────────
@@ -193,7 +223,7 @@ if meta.get("type") == "unknown":
 itype = meta.get("type", "stock")
 col_h1, col_h2 = st.columns([3, 1])
 with col_h1:
-    st.header(f"{meta.get('display_name', ticker_input)}  ({ticker_input})")
+    st.header(f"{meta.get('display_name', active_ticker)}  ({active_ticker})")
     if meta.get("sector"):
         st.caption(f"🏭 {meta['sector']}  ·  {meta.get('industry', '')}")
     elif meta.get("category"):
@@ -274,17 +304,7 @@ tab_social, tab_smart, tab_analyst, tab_peers, tab_patterns, tab_radar = tabs
 with tab_claude:
     st.subheader(f"{ai_provider} Investment Recommendation")
     with st.spinner("Generating AI analysis…"):
-        advice = generate_recommendation(
-            ticker=ticker_input,
-            instrument_type=itype,
-            instrument_meta=meta,
-            fundamental=fund, technical=tech,
-            news=news, patterns=pats,
-            analyst=anl, peers=peers,
-            social=social, smart_money=smart,
-            earnings=earnings,
-            provider=provider,
-        )
+        advice = _get_advice(active_ticker, provider, data)
 
     if "error" in advice:
         st.error(f"AI API error: {advice['error']}")
@@ -328,7 +348,7 @@ with tab_claude:
     if export_pdf_btn:
         with st.spinner("Exporting PDF…"):
             chart_path = tech.get("chart_path", "")
-            radar_path = generate_radar_chart(ticker_input, {
+            radar_path = generate_radar_chart(active_ticker, {
                 "Fundamental": fund_score, "Technical": tech_score,
                 "News": news_score,        "Analyst":   anl_score,
                 "Peers": peer_score,       "Patterns":  pat_score,
@@ -390,12 +410,130 @@ with tab_tech:
     if "error" in tech:
         st.error(tech["error"])
     else:
-        chart_path = tech.get("chart_path")
-        if chart_path and os.path.exists(chart_path):
-            st.image(chart_path, use_container_width=True)
+        import pandas as pd
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        hist = tech.get("hist")
+        if hist is not None and not hist.empty:
+            # Strip timezone
+            hist = hist.copy()
+            hist.index = hist.index.tz_localize(None)
+
+            # Timeframe selector
+            tf = st.radio(
+                "Timeframe", ["1M", "3M", "6M", "1Y", "All"],
+                index=2, horizontal=True, key="tech_tf",
+            )
+            last_date = hist.index[-1]
+            offsets = {"1M": pd.DateOffset(months=1), "3M": pd.DateOffset(months=3),
+                       "6M": pd.DateOffset(months=6), "1Y": pd.DateOffset(years=1)}
+            if tf in offsets:
+                hist = hist[hist.index >= last_date - offsets[tf]]
+
+            close  = hist["Close"]
+            ma50s  = close.rolling(50).mean()
+            ma200s = close.rolling(200).mean()
+
+            # RSI series
+            delta   = close.diff()
+            gain    = delta.clip(lower=0).ewm(com=13, min_periods=14).mean()
+            loss    = (-delta.clip(upper=0)).ewm(com=13, min_periods=14).mean()
+            rsi_s   = 100 - 100 / (1 + gain / loss.replace(0, float("nan")))
+
+            # MACD series
+            ema12   = close.ewm(span=12).mean()
+            ema26   = close.ewm(span=26).mean()
+            macd_s  = ema12 - ema26
+            sig_s   = macd_s.ewm(span=9).mean()
+            hist_s  = macd_s - sig_s
+
+            up_color   = "#26a69a"
+            down_color = "#ef5350"
+            bar_colors = [up_color if c >= o else down_color
+                          for c, o in zip(hist["Close"], hist["Open"])]
+
+            fig = make_subplots(
+                rows=4, cols=1,
+                shared_xaxes=True,
+                row_heights=[0.5, 0.17, 0.17, 0.16],
+                vertical_spacing=0.02,
+                subplot_titles=(f"{active_ticker} Price", "Volume", "RSI (14)", "MACD"),
+            )
+
+            # ── Row 1: Candlestick + MAs ──
+            fig.add_trace(go.Candlestick(
+                x=hist.index,
+                open=hist["Open"], high=hist["High"],
+                low=hist["Low"],   close=hist["Close"],
+                name="Price",
+                increasing_line_color=up_color,
+                decreasing_line_color=down_color,
+                increasing_fillcolor=up_color,
+                decreasing_fillcolor=down_color,
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=ma50s, name="MA 50",
+                line=dict(color="#ffb300", width=1.5, dash="dot"),
+            ), row=1, col=1)
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=ma200s, name="MA 200",
+                line=dict(color="#ef5350", width=1.5, dash="dot"),
+            ), row=1, col=1)
+
+            # ── Row 2: Volume ──
+            fig.add_trace(go.Bar(
+                x=hist.index, y=hist["Volume"],
+                name="Volume", marker_color=bar_colors, showlegend=False,
+            ), row=2, col=1)
+
+            # ── Row 3: RSI ──
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=rsi_s, name="RSI",
+                line=dict(color="#ce93d8", width=1.5),
+            ), row=3, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="#ef5350", line_width=1, row=3, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="#26a69a", line_width=1, row=3, col=1)
+
+            # ── Row 4: MACD ──
+            macd_bar_colors = [up_color if v >= 0 else down_color for v in hist_s]
+            fig.add_trace(go.Bar(
+                x=hist.index, y=hist_s, name="MACD Hist",
+                marker_color=macd_bar_colors, showlegend=False,
+            ), row=4, col=1)
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=macd_s, name="MACD",
+                line=dict(color="#4fc3f7", width=1.5),
+            ), row=4, col=1)
+            fig.add_trace(go.Scatter(
+                x=hist.index, y=sig_s, name="Signal",
+                line=dict(color="#ffb300", width=1.5),
+            ), row=4, col=1)
+
+            fig.update_layout(
+                height=750,
+                paper_bgcolor="#0f1117",
+                plot_bgcolor="#0f1117",
+                font=dict(color="#cccccc"),
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.02, x=0,
+                            bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=0, r=0, t=30, b=0),
+            )
+            for i in range(1, 5):
+                fig.update_xaxes(gridcolor="#1e2130", row=i, col=1)
+                fig.update_yaxes(gridcolor="#1e2130", row=i, col=1)
+            fig.update_yaxes(tickprefix="$", row=1, col=1)
+            fig.update_yaxes(title_text="Vol",  row=2, col=1,
+                             tickformat=".2s")
+            fig.update_yaxes(title_text="RSI",  row=3, col=1, range=[0, 100])
+            fig.update_yaxes(title_text="MACD", row=4, col=1)
+
+            st.plotly_chart(fig, use_container_width=True)
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("RSI (14)",   str(tech.get("rsi",  "N/A")))
+        c1.metric("RSI (14)",   f"{tech['rsi']:.1f}" if tech.get("rsi") is not None else "N/A")
         c2.metric("MACD",       f"{tech['macd']:.3f}" if tech.get("macd") is not None else "N/A")
         c3.metric("MA 50",      f"${tech['ma50']:.2f}" if tech.get("ma50") else "N/A")
         c4.metric("MA 200",     f"${tech['ma200']:.2f}" if tech.get("ma200") else "N/A")
@@ -640,7 +778,7 @@ with tab_radar:
         "Peers":       peer_score,
         "Patterns":    pat_score,
     }
-    radar_path = generate_radar_chart(ticker_input, scores)
+    radar_path = generate_radar_chart(active_ticker, scores)
     if radar_path and os.path.exists(radar_path):
         st.image(radar_path, use_container_width=False, width=500)
     else:
