@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Merge Streamlit secrets into environment so existing skills pick them up
-for key in ("ANTHROPIC_API_KEY", "NEWSAPI_KEY"):
+for key in ("ANTHROPIC_API_KEY", "NEWSAPI_KEY", "GEMINI_API_KEY"):
     if key not in os.environ:
         try:
             if key in st.secrets:
@@ -121,6 +121,14 @@ with st.sidebar:
         max_chars=10,
     ).upper().strip()
 
+    ai_provider = st.radio(
+        "AI Model",
+        options=["Claude Haiku", "Gemini 2.5 Flash"],
+        index=0,
+        horizontal=True,
+    )
+    provider = "gemini" if ai_provider == "Gemini 2.5 Flash" else "claude"
+
     analyze_btn = st.button("🔍 Analyze", type="primary", use_container_width=True)
     export_pdf_btn = st.checkbox("Export PDF report", value=False)
 
@@ -131,7 +139,7 @@ with st.sidebar:
         "- News: NewsAPI\n"
         "- Social: StockTwits + Reddit\n"
         "- Filings: SEC EDGAR\n"
-        "- AI narrative: Claude (Haiku)\n"
+        f"- AI narrative: {ai_provider}\n"
     )
     st.markdown("---")
     st.caption("⚠️ Not financial advice. Always do your own research.")
@@ -244,7 +252,7 @@ st.divider()
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
 tabs = st.tabs([
-    "🤖 Claude AI",
+    f"🤖 {ai_provider}",
     "📊 Fundamental",
     "📈 Technical",
     "💰 Earnings",
@@ -264,7 +272,7 @@ tab_social, tab_smart, tab_analyst, tab_peers, tab_patterns, tab_radar = tabs
 # ── Claude AI tab ─────────────────────────────────────────────────────────────
 
 with tab_claude:
-    st.subheader("Claude AI Investment Recommendation")
+    st.subheader(f"{ai_provider} Investment Recommendation")
     with st.spinner("Generating AI analysis…"):
         advice = generate_recommendation(
             ticker=ticker_input,
@@ -275,10 +283,11 @@ with tab_claude:
             analyst=anl, peers=peers,
             social=social, smart_money=smart,
             earnings=earnings,
+            provider=provider,
         )
 
     if "error" in advice:
-        st.error(f"Claude API error: {advice['error']}")
+        st.error(f"AI API error: {advice['error']}")
     else:
         sections = advice.get("sections", {})
         narrative = advice.get("narrative", "")

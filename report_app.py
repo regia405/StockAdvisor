@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
 
 load_dotenv()
-for key in ("ANTHROPIC_API_KEY", "NEWSAPI_KEY"):
+for key in ("ANTHROPIC_API_KEY", "NEWSAPI_KEY", "GEMINI_API_KEY"):
     if key not in os.environ:
         try:
             if key in st.secrets:
@@ -205,8 +205,8 @@ def _kpi(label, value):
 def _section(title, body_html):
     return f'<div class="section-card"><div class="section-title">{title}</div><div class="section-body">{body_html}</div></div>'
 
-def _run_all_analyses(ticker):
-    """Run all analyses + Claude. Called in a background thread."""
+def _run_all_analyses(ticker, provider="claude"):
+    """Run all analyses + AI recommendation. Called in a background thread."""
     tasks = {
         "meta":        lambda: classify(ticker),
         "fundamental": lambda: fundamental_analyze(ticker),
@@ -244,6 +244,7 @@ def _run_all_analyses(ticker):
             social=results.get("social"),
             smart_money=results.get("smart_money"),
             earnings=results.get("earnings"),
+            provider=provider,
         )
     except Exception as e:
         results["advice"] = {"error": str(e)}
@@ -251,9 +252,9 @@ def _run_all_analyses(ticker):
     return results
 
 
-def run_with_progress(ticker):
+def run_with_progress(ticker, provider="claude"):
     """Run analyses in background thread, show smooth progress bar, cache in session_state."""
-    cache_key = f"data_{ticker}"
+    cache_key = f"data_{ticker}_{provider}"
 
     # Already done — return instantly, page renders normally
     if cache_key in st.session_state:
@@ -264,7 +265,7 @@ def run_with_progress(ticker):
 
     def _worker():
         try:
-            result_box["data"] = _run_all_analyses(ticker)
+            result_box["data"] = _run_all_analyses(ticker, provider)
         except Exception as e:
             error_box["err"] = str(e)
 
@@ -282,7 +283,7 @@ def run_with_progress(ticker):
         "Gathering Wall Street analyst consensus…",
         "Comparing performance against sector peers…",
         "Matching historical price patterns…",
-        "Generating Claude AI investment recommendation…",
+        f"Generating {'Gemini 2.5 Flash' if provider == 'gemini' else 'Claude AI'} investment recommendation…",
         "Compiling your personalised report…",
     ]
 
@@ -318,6 +319,7 @@ def run_with_progress(ticker):
 
     # Store result then rerun so Streamlit renders the full dashboard cleanly
     st.session_state[cache_key] = result_box.get("data", {})
+    st.session_state["last_cache_key"] = cache_key
     st.rerun()
 
 def build_pdf(ticker, data, scores, advice, tmp_dir):
@@ -379,13 +381,22 @@ with col_mid:
         max_chars=10, key="ticker",
         label_visibility="collapsed",
     ).upper().strip()
+    ai_choice = st.radio(
+        "AI Model",
+        options=["Claude Haiku", "Gemini 2.5 Flash"],
+        index=0,
+        horizontal=True,
+        key="ai_model",
+    )
     go = st.button("Analyze", type="primary", use_container_width=True)
 
-# Persist the ticker across reruns (button resets to False on st.rerun())
+# Persist the ticker and provider across reruns
 if go and ticker_input:
     st.session_state["active_ticker"] = ticker_input
+    st.session_state["active_provider"] = "gemini" if ai_choice == "Gemini 2.5 Flash" else "claude"
 
 active_ticker = st.session_state.get("active_ticker", "")
+active_provider = st.session_state.get("active_provider", "claude")
 
 st.markdown("<hr class='divider'>", unsafe_allow_html=True)
 
@@ -404,7 +415,7 @@ if not active_ticker:
 
 # ── Run analyses ──────────────────────────────────────────────────────────────
 
-data = run_with_progress(active_ticker)
+data = run_with_progress(active_ticker, active_provider)
 
 if not data:
     st.error("No data returned. Please try again.")
@@ -533,9 +544,10 @@ st.markdown("<br>", unsafe_allow_html=True)
 sections = advice.get("sections", {})
 
 if "error" in advice:
-    st.error(f"Claude API error: {advice['error']}")
+    st.error(f"AI API error: {advice['error']}")
 else:
-    st.markdown("### Claude AI Recommendation")
+    model_label = "Gemini 2.5 Flash" if active_provider == "gemini" else "Claude AI"
+    st.markdown(f"### {model_label} Recommendation")
     rec_col, bc_col, bear_col = st.columns([2, 1, 1])
 
     with rec_col:

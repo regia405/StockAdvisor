@@ -39,6 +39,22 @@ import anthropic
 load_dotenv()
 
 
+def _call_gemini(prompt: str, max_tokens: int = 8000) -> str:
+    """Call Gemini 2.5 Flash and return the response text."""
+    from google import genai
+    from google.genai import types
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not set. Add it to your .env file.")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(max_output_tokens=max_tokens),
+    )
+    return response.text
+
+
 def _build_prompt(ticker, instrument_type, instrument_meta,
                   fundamental, technical, news, patterns,
                   analyst=None, peers=None,
@@ -290,7 +306,8 @@ def generate_recommendation(ticker: str, instrument_type: str,
                              news: dict, patterns: dict,
                              analyst: dict = None, peers: dict = None,
                              social: dict = None, smart_money: dict = None,
-                             earnings: dict = None) -> dict:
+                             earnings: dict = None,
+                             provider: str = "claude") -> dict:
     """
     Call the Claude API to generate a detailed narrative analysis.
 
@@ -307,12 +324,22 @@ def generate_recommendation(ticker: str, instrument_type: str,
         dict with keys: narrative (full text), sections (dict of parsed
         sections), summary (formatted string for printing)
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {
-            "error": "ANTHROPIC_API_KEY not set. Add it to your .env file.",
-            "summary": "Claude Advisor: API key not configured.",
-        }
+    if provider not in ("claude", "gemini"):
+        provider = "claude"
+
+    if provider == "claude":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            return {
+                "error": "ANTHROPIC_API_KEY not set. Add it to your .env file.",
+                "summary": "Claude Advisor: API key not configured.",
+            }
+    else:
+        if not os.getenv("GEMINI_API_KEY"):
+            return {
+                "error": "GEMINI_API_KEY not set. Add it to your .env file.",
+                "summary": "Gemini Advisor: API key not configured.",
+            }
 
     # Add formatted percentage versions of key fields so the prompt
     # is easier for Claude to interpret.
@@ -360,25 +387,29 @@ def generate_recommendation(ticker: str, instrument_type: str,
         }
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2400,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        narrative = message.content[0].text
+        if provider == "gemini":
+            narrative = _call_gemini(prompt, max_tokens=8000)
+        else:
+            client = anthropic.Anthropic(api_key=api_key)
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2400,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            narrative = message.content[0].text
     except Exception as e:
         import traceback
         return {
             "error": f"{e}\n{traceback.format_exc()}",
-            "summary": f"Claude Advisor: API call failed — {e}",
+            "summary": f"AI Advisor: API call failed — {e}",
         }
 
     # Parse sections from the narrative
     sections = _parse_sections(narrative)
 
+    model_label = "Gemini 2.5 Flash" if provider == "gemini" else "Claude Haiku"
     summary_lines = [
-        f"Claude AI Analysis -- {ticker}",
+        f"{model_label} Analysis -- {ticker}",
         "=" * 40,
         narrative,
         "",
@@ -393,7 +424,8 @@ def generate_recommendation(ticker: str, instrument_type: str,
     }
 
 
-def generate_portfolio_narrative(portfolio_summary: str, holdings_analyses: list) -> dict:
+def generate_portfolio_narrative(portfolio_summary: str, holdings_analyses: list,
+                                  provider: str = "claude") -> dict:
     """
     Ask Claude to write a portfolio-level narrative based on all holding scores.
 
@@ -403,9 +435,15 @@ def generate_portfolio_narrative(portfolio_summary: str, holdings_analyses: list
 
     Returns dict with narrative, summary
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        return {"error": "ANTHROPIC_API_KEY not set.", "summary": "Claude: API key missing."}
+    if provider not in ("claude", "gemini"):
+        provider = "claude"
+    if provider == "claude":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            return {"error": "ANTHROPIC_API_KEY not set.", "summary": "Claude: API key missing."}
+    else:
+        if not os.getenv("GEMINI_API_KEY"):
+            return {"error": "GEMINI_API_KEY not set.", "summary": "Gemini: API key missing."}
 
     holdings_text = "\n".join(
         f"  {h['ticker']}: Fund={h.get('fundamental_score','?')}/10, "
@@ -432,25 +470,32 @@ Be direct. Name specific tickers. Do not add disclaimers.
 """
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        narrative = msg.content[0].text
+        if provider == "gemini":
+            narrative = _call_gemini(prompt, max_tokens=600)
+        else:
+            client = anthropic.Anthropic(api_key=api_key)
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=600,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            narrative = msg.content[0].text
     except Exception as e:
         return {"error": str(e), "summary": f"Portfolio narrative failed: {e}"}
 
+    model_label = "Gemini 2.5 Flash" if provider == "gemini" else "Claude"
     return {
         "narrative": narrative,
-        "summary": f"Claude Portfolio Assessment\n{'=' * 40}\n{narrative}\n\nThis is not financial advice. Always do your own research.",
+        "summary": f"{model_label} Portfolio Assessment\n{'=' * 40}\n{narrative}\n\nThis is not financial advice. Always do your own research.",
     }
 
 
 def _parse_sections(text: str) -> dict:
     """
-    Extract named sections from Claude's response into a dict.
+    Extract named sections from the AI response into a dict.
+    Handles both formats:
+      - Header on its own line followed by content on next lines (Claude)
+      - Header and content on the same line: "SECTION: content" (Gemini)
     """
     section_keys = {
         "FUNDAMENTAL ANALYSIS":  "fundamental",
@@ -476,12 +521,27 @@ def _parse_sections(text: str) -> dict:
     current_lines = []
 
     for line in lines:
-        stripped = line.strip().lstrip("#").strip().rstrip(":")
-        if stripped in section_keys:
+        stripped = line.strip().lstrip("#").strip().strip("*").strip()
+
+        # Check if line starts with a known section header (with or without trailing colon)
+        matched_key = None
+        matched_inline = ""
+        for header in section_keys:
+            # Match "HEADER:" or "HEADER: inline content" or "HEADER" alone
+            if stripped == header or stripped == header + ":":
+                matched_key = header
+                matched_inline = ""
+                break
+            if stripped.startswith(header + ":"):
+                matched_key = header
+                matched_inline = stripped[len(header) + 1:].strip()
+                break
+
+        if matched_key:
             if current_key:
                 sections[section_keys[current_key]] = "\n".join(current_lines).strip()
-            current_key = stripped
-            current_lines = []
+            current_key = matched_key
+            current_lines = [matched_inline] if matched_inline else []
         else:
             if current_key:
                 current_lines.append(line)
